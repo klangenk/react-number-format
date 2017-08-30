@@ -102,7 +102,8 @@ class App extends React.Component {
           <h3>
             Format with mask : Format credit card in an input
           </h3>
-          <NumberFormat format="#### #### #### ####" mask="_" />
+          <NumberFormat format="#### #### #### ####" mask="_"/>
+          <NumberFormat value="9876543210" format="+1 (###) ### ## ##" />
         </div>
 
         <div className="example">

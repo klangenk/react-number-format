@@ -129,6 +129,17 @@ describe('NumberFormat as input', () => {
   });
 
 
+  it('should allow adding numbers in format props', () => {
+    const wrapper = shallow(<NumberFormat value="9876543210" format="+1 (###) ### ## ##" />);
+    const input = wrapper.find('input');
+
+    expect(wrapper.state().value).toEqual('+1 (987) 654 32 10');
+
+    input.simulate('change', getCustomEvent('+1 (987) 654 3211'));
+
+    expect(wrapper.state().value).toEqual('+1 (987) 654 32 11');
+  })
+
   it('should block inputs based on isAllowed callback', () => {
     const wrapper = shallow(<NumberFormat isAllowed={(values) => {
       const {floatValue} = values;
