@@ -1,5 +1,15 @@
+//@flow
 import PropTypes from 'prop-types';
 import React from 'react';
+
+/** type defination **/
+declare class SyntheticKeyboardInputEvent extends SyntheticKeyboardEvent {
+    target: HTMLInputElement
+}
+
+declare class SyntheticMouseInputEvent extends SyntheticMouseEvent {
+    target: HTMLInputElement
+}
 
 function noop(){}
 
@@ -63,11 +73,13 @@ const propTypes = {
     PropTypes.string,
     PropTypes.func
   ]),
+  removeFormatting: PropTypes.func,
   mask: PropTypes.string,
   value: PropTypes.oneOfType([
     PropTypes.number,
     PropTypes.string
   ]),
+  isNumericString: PropTypes.bool,
   customInput: PropTypes.func,
   allowNegative: PropTypes.bool,
   onKeyDown: PropTypes.func,
@@ -83,6 +95,7 @@ const defaultProps = {
   prefix: '',
   suffix: '',
   allowNegative: true,
+  isNumericString: false,
   type: 'text',
   onChange: noop,
   onKeyDown: noop,
@@ -91,28 +104,34 @@ const defaultProps = {
 };
 
 class NumberFormat extends React.Component {
-  constructor(props) {
+  state: {
+    value?: string
+  }
+  onChange: Function
+  onKeyDown: Function
+  onMouseUp: Function
+  static defaultProps: Object
+  constructor(props: Object) {
     super(props);
-    const value = this.optimizeValueProp(props);
     this.state = {
-      value: this.formatInput(value).formattedValue
+      value: this.formatValueProp()
     }
     this.onChange = this.onChange.bind(this);
     this.onKeyDown = this.onKeyDown.bind(this);
     this.onMouseUp = this.onMouseUp.bind(this);
   }
 
-  componentDidUpdate(prevProps, prevState) {
-    this.updateValueIfRequired(prevProps, prevState);
+  componentDidUpdate(prevProps: Object) {
+    this.updateValueIfRequired(prevProps);
   }
 
-  updateValueIfRequired(prevProps) {
+  updateValueIfRequired(prevProps: Object) {
     const {props, state} = this;
 
     if(prevProps !== props) {
       const stateValue = state.value;
 
-      let value = this.optimizeValueProp(props);
+      let value = this.formatValueProp();
       if (value === undefined) value = stateValue;
 
       const {formattedValue} = this.formatInput(value);
@@ -125,83 +144,23 @@ class NumberFormat extends React.Component {
     }
   }
 
-  getFloatString(num, props) {
-    props = props || this.props;
-    const {decimalSeparator, thousandSeparator} = this.getSeparators(props);
-    return (num || '').replace(new RegExp(escapeRegExp(thousandSeparator || ''), 'g'), '').replace(decimalSeparator, '.');
+  /** Misc methods **/
+  getFloatString(num: string) {
+    const {decimalSeparator} = this.getSeparators();
+    const numRegex = this.getNumberRegex(true);
+    return (num.match(numRegex) || []).join('').replace(decimalSeparator, '.');
   }
 
-  getFloatValue(num, props) {
-    props = props || this.props;
-    return parseFloat(this.getFloatString(num, props)) || 0;
+  //returned regex assumes decimalSeparator is as per prop
+  getNumberRegex(g: boolean, ignoreDecimalSeparator?: boolean) {
+    const {format, decimalPrecision} = this.props;
+    const {decimalSeparator} = this.getSeparators();
+    return new RegExp('\\d' + (decimalSeparator && decimalPrecision !== 0 && !ignoreDecimalSeparator && !format ? '|' + escapeRegExp(decimalSeparator) : ''), g ? 'g' : undefined);
   }
 
-  optimizeValueProp(props) {
-    const {decimalSeparator} = this.getSeparators(props);
-    const {decimalPrecision, format} = props;
-
-    let {value} = props;
-
-    if (format || !(value || value === 0)) return value;
-
-    const isNumber = typeof value === 'number';
-
-    if (isNumber) value = value.toString();
-
-    value = this.removePrefixAndSuffix(isNumber ? value: this.getFloatString(value, props), props);
-
-    //round off value
-    if(typeof decimalPrecision === 'number') value = roundToPrecision(value, decimalPrecision);
-
-    //correct decimal separator
-    if (decimalSeparator) {
-      value = value.replace('.', decimalSeparator);
-    }
-
-    //throw error if value has two decimal seperators
-    if (value.split(decimalSeparator).length > 2) {
-      throw new Error(`
-          Wrong input for value props.\n
-          More than one decimalSeparator found
-       `);
-    }
-
-    //if decimalPrecision is 0 remove decimalNumbers
-    if (decimalPrecision === 0) return value.split(decimalSeparator)[0]
-
-    return value;
-  }
-
-  removePrefixAndSuffix(val, props) {
-    const {format, prefix, suffix} = props;
-
-    //remove prefix and suffix
-    if (!format && val) {
-      const isNegative = val[0] === '-';
-
-      //remove negation sign
-      if (isNegative) val = val.substring(1, val.length);
-
-      //remove prefix
-      val = prefix && val.indexOf(prefix) === 0 ? val.substring(prefix.length, val.length) : val;
-
-      //remove suffix
-      const suffixLastIndex = val.lastIndexOf(suffix);
-      val = suffix && suffixLastIndex !== -1 && suffixLastIndex === val.length - suffix.length ? val.substring(0, suffixLastIndex) : val;
-
-      //add negation sign back
-      if (isNegative) val = '-' + val;
-    }
-
-    return val;
-  }
-
-  getSeparators(props) {
-    props = props || this.props;
-
-    const {decimalSeparator} = props;
-
-    let {thousandSeparator} = props;
+  getSeparators() {
+    const {decimalSeparator} = this.props;
+    let {thousandSeparator} = this.props;
 
     if (thousandSeparator === true) {
       thousandSeparator = ','
@@ -221,13 +180,11 @@ class NumberFormat extends React.Component {
     }
   }
 
-  getNumberRegex(g, ignoreDecimalSeparator) {
-    const {format, decimalPrecision} = this.props;
-    const {decimalSeparator} = this.getSeparators();
-    return new RegExp('\\d' + (decimalSeparator && decimalPrecision !== 0 && !ignoreDecimalSeparator && !format ? '|' + escapeRegExp(decimalSeparator) : ''), g ? 'g' : undefined);
-  }
+  /** Misc methods end **/
 
-  setCaretPosition(el, caretPos) {
+
+  /** caret specific methods **/
+  setCaretPosition(el: HTMLInputElement, caretPos: number) {
     el.value = el.value;
     // ^ this is used to not only get "focus", but
     // to make sure we don't have it everything -selected-
@@ -252,12 +209,10 @@ class NumberFormat extends React.Component {
     }
   }
 
-  setPatchedCaretPosition(el, caretPos, currentValue) {
-        /*
-      setting caret position within timeout of 0ms is required for mobile chrome,
-      otherwise browser resets the caret position after we set it
-      We are also setting it without timeout so that in normal browser we don't see the flickering
-      */
+  setPatchedCaretPosition(el: HTMLInputElement, caretPos: number, currentValue: string) {
+    /* setting caret position within timeout of 0ms is required for mobile chrome,
+    otherwise browser resets the caret position after we set it
+    We are also setting it without timeout so that in normal browser we don't see the flickering */
     this.setCaretPosition(el, caretPos);
     setTimeout(() => {
       if(el.value === currentValue) this.setCaretPosition(el, caretPos);
@@ -265,112 +220,12 @@ class NumberFormat extends React.Component {
   }
 
   /* This keeps the caret within typing area so people can't type in between prefix or suffix */
-  correctCaretPosition(value, caretPos) {
+  correctCaretPosition(value: string, caretPos: number) {
     const {prefix, suffix} = this.props;
     return Math.min(Math.max(caretPos, prefix.length), (value.length - suffix.length));
   }
 
-  formatWithPattern(str) {
-    const {format,mask} = this.props;
-    if (!format) return str;
-    const hashCount = format.split('#').length - 1;
-    let hashIdx = 0;
-    let frmtdStr = format;
-
-    for(let i=0, ln=str.length; i<ln; i++ ){
-      if(i < hashCount){
-        hashIdx = frmtdStr.indexOf('#');
-        frmtdStr = frmtdStr.replace('#',str[i]);
-      }
-    }
-
-    const lastIdx = frmtdStr.lastIndexOf('#');
-
-    if(mask){
-      return frmtdStr.replace(/#/g,mask);
-    }
-    return frmtdStr.substring(0,hashIdx + 1) + (lastIdx!==-1 ? frmtdStr.substring(lastIdx + 1, frmtdStr.length) :'');
-  }
-
-  formatInput(val) {
-    const {props, removePrefixAndSuffix} = this;
-    const {prefix, suffix, mask, format, allowNegative, decimalPrecision} = props;
-    const {thousandSeparator, decimalSeparator} = this.getSeparators();
-    const maskPattern = format && typeof format == 'string' && !!mask;
-    const numRegex = this.getNumberRegex(true);
-    let hasNegative, removeNegative;
-
-    //change val to string if its number
-    if(typeof val === 'number') val = val + '';
-
-    const negativeRegex = new RegExp('(-)');
-    const doubleNegativeRegex = new RegExp('(-)(.)*(-)');
-
-    //check if it has negative numbers
-    if (allowNegative && !format) {
-      // Check number has '-' value
-      hasNegative = negativeRegex.test(val);
-      // Check number has 2 or more '-' values
-      removeNegative = doubleNegativeRegex.test(val);
-    }
-
-    //remove prefix and suffix
-    val = removePrefixAndSuffix(val, props);
-
-    const valMatch = val && val.match(numRegex);
-
-    if (!valMatch && removeNegative) {
-      return {value :'', formattedValue: ''}
-    } else if (!valMatch && hasNegative) {
-      return {value :'', formattedValue: '-'}
-    } else if (!valMatch) {
-      return {value :'', formattedValue: (maskPattern ? '' : '')}
-    }
-
-    const num = val.match(numRegex).join('');
-
-    let formattedValue = num;
-
-    if(format){
-      if(typeof format == 'string'){
-        formattedValue = this.formatWithPattern(formattedValue);
-      }
-      else if(typeof format == 'function'){
-        formattedValue = format(formattedValue);
-      }
-    }
-    else{
-      const hasDecimalSeparator = formattedValue.indexOf(decimalSeparator) !== -1 || decimalPrecision;
-
-      const parts = formattedValue.split(decimalSeparator);
-      let beforeDecimal = parts[0];
-      let afterDecimal = parts[1] || '';
-
-      //remove leading zeros from number before decimal
-      beforeDecimal = removeLeadingZero(beforeDecimal);
-
-      //apply decimal precision if its defined
-      if (decimalPrecision !== undefined) afterDecimal = limitToPrecision(afterDecimal, decimalPrecision);
-
-      if(thousandSeparator) {
-        beforeDecimal = beforeDecimal.replace(/(\d)(?=(\d{3})+(?!\d))/g, '$1' + thousandSeparator);
-      }
-
-      //add prefix and suffix
-      if(prefix) beforeDecimal = prefix + beforeDecimal;
-      if(suffix) afterDecimal = afterDecimal + suffix;
-
-      if (hasNegative && !removeNegative) beforeDecimal = '-' + beforeDecimal;
-
-      formattedValue = beforeDecimal + (hasDecimalSeparator && decimalSeparator ||  '') + afterDecimal;
-    }
-
-    return {
-        value : (hasNegative && !removeNegative ? '-' : '') + removePrefixAndSuffix(formattedValue, props).match(numRegex).join(''),
-        formattedValue : formattedValue
-    }
-  }
-  getCaretPosition(inputValue, formattedValue, caretPos) {
+  getCaretPosition(inputValue: string, formattedValue: string, caretPos: number) {
     const numRegex = this.getNumberRegex(true);
     const inputNumber = (inputValue.match(numRegex) || []).join('');
     const formattedNumber = (formattedValue.match(numRegex) || []).join('');
@@ -399,15 +254,215 @@ class NumberFormat extends React.Component {
 
     return j;
   }
+  /** caret specific methods ends **/
 
-  onChange(e) {
+
+  /** methods to remove formattting **/
+  removePrefixAndSuffix(val: string) {
+    const {format, prefix, suffix} = this.props;
+
+    //remove prefix and suffix
+    if (!format && val) {
+      const isNegative = val[0] === '-';
+
+      //remove negation sign
+      if (isNegative) val = val.substring(1, val.length);
+
+      //remove prefix
+      val = prefix && val.indexOf(prefix) === 0 ? val.substring(prefix.length, val.length) : val;
+
+      //remove suffix
+      const suffixLastIndex = val.lastIndexOf(suffix);
+      val = suffix && suffixLastIndex !== -1 && suffixLastIndex === val.length - suffix.length ? val.substring(0, suffixLastIndex) : val;
+
+      //add negation sign back
+      if (isNegative) val = '-' + val;
+    }
+
+    return val;
+  }
+
+  removePatternFormatting(val: string) {
+    const {format} = this.props;
+    const formatArray = format.split('#').filter(str => str !== '');
+    let start = 0;
+    let numStr = '';
+
+    formatArray.forEach((part) => {
+      const index = val.indexOf(part, start);
+      numStr += val.substring(start, index);
+      start = index + part.length;
+    })
+
+    return (numStr.match(/\d/g) || []).join('');
+  }
+
+  removeFormatting(val: string) {
+    const {format, removeFormatting} = this.props;
+    if (!val) return val;
+
+    if (!format) {
+      val = this.removePrefixAndSuffix(val);
+      val = this.getFloatString(val);
+    } else if (typeof format === 'string') {
+      val = this.removePatternFormatting(val);
+    } else if (typeof removeFormatting === 'function') { //condition need to be handled if format method is provide,
+      val = removeFormatting(val);
+    } else {
+      val = (val.match(/\d/g) || []).join('')
+    }
+    return val;
+  }
+  /** methods to remove formattting end **/
+
+
+  /*** format specific methods start ***/
+  /**
+   * Format when # based string is provided
+   * @param  {string} numStr Numeric String
+   * @return {string}        formatted Value
+   */
+  formatWithPattern(numStr: string) {
+    const {format, mask = ' '} = this.props;
+    let hashCount = 0;
+    const formattedNumberAry = format.split('');
+    for (let i = 0, ln = format.length; i < ln; i++) {
+      if (format[i] === '#') {
+        formattedNumberAry[i] = numStr[hashCount] || mask;
+        hashCount += 1;
+      }
+    }
+    return formattedNumberAry.join('');
+  }
+  /**
+   * @param  {string} numStr Numeric string/floatString] It always have decimalSeparator as .
+   * @return {string} formatted Value
+   */
+  formatAsNumber(numStr: string) {
+    const {decimalPrecision, allowNegative, prefix, suffix} = this.props;
+    const {thousandSeparator, decimalSeparator} = this.getSeparators();
+
+    // Check if its negative number and remove negation for futher formatting
+    const hasNagation = numStr[0] === '-';
+    numStr = numStr.replace('-', '');
+
+    const hasDecimalSeparator = numStr.indexOf('.') !== -1 || decimalPrecision;
+
+    const parts = numStr.split('.');
+    let beforeDecimal = parts[0];
+    let afterDecimal = parts[1] || '';
+
+    //remove leading zeros from number before decimal
+    beforeDecimal = removeLeadingZero(beforeDecimal);
+
+    //apply decimal precision if its defined
+    if (decimalPrecision !== undefined) afterDecimal = limitToPrecision(afterDecimal, decimalPrecision);
+
+    if(thousandSeparator) {
+      beforeDecimal = beforeDecimal.replace(/(\d)(?=(\d{3})+(?!\d))/g, '$1' + thousandSeparator);
+    }
+
+    //add prefix and suffix
+    if(prefix) beforeDecimal = prefix + beforeDecimal;
+    if(suffix) afterDecimal = afterDecimal + suffix;
+
+    //restore negation sign
+    if (hasNagation && allowNegative) beforeDecimal = '-' + beforeDecimal;
+
+    numStr = beforeDecimal + (hasDecimalSeparator && decimalSeparator ||  '') + afterDecimal;
+
+    return numStr;
+  }
+
+  formatNumString(value: string) {
+    const {format} = this.props;
+    let formattedValue = value;
+
+    //if value has negation or double negation without any number remove it as it should be only on formattedValue
+    if (value === '-' || value === '--') value = '';
+
+    if (value === '') {
+      formattedValue = ''
+    } else if (typeof format === 'string') {
+      formattedValue = this.formatWithPattern(formattedValue);
+    } else if (typeof format === 'function') {
+      formattedValue = format(formattedValue);
+    } else {
+      formattedValue = this.formatAsNumber(formattedValue)
+    }
+
+    return {
+      value,
+      formattedValue
+    }
+  }
+
+  formatValueProp() {
+    const {format, decimalPrecision} = this.props;
+    let {value, isNumericString} = this.props;
+
+    if (value === undefined) return;
+
+    if (typeof value === 'number') {
+      value = value.toString();
+      isNumericString = true;
+    }
+
+    //round the number based on decimalPrecision
+    if (isNumericString && !format && typeof decimalPrecision === 'number') {
+      value = roundToPrecision(value, decimalPrecision)
+    }
+
+    const values = isNumericString ? this.formatNumString(value) : this.formatInput(value);
+
+    return values.formattedValue;
+  }
+
+  formatNegation(value: string = '') {
+    const {allowNegative} = this.props;
+    const negationRegex = new RegExp('(-)');
+    const doubleNegationRegex = new RegExp('(-)(.)*(-)');
+
+    // Check number has '-' value
+    const hasNegation = negationRegex.test(value);
+
+    // Check number has 2 or more '-' values
+    const removeNegation = doubleNegationRegex.test(value);
+
+    //remove negation
+    value = value.replace(/-/g, '');
+
+    if (hasNegation && !removeNegation && allowNegative) {
+      value = '-' + value;
+    }
+
+    return value;
+  }
+
+  formatInput(value: string = '') {
+    const {format} = this.props;
+
+    //format negation only if we are formatting as number
+    if (!format) {
+      value = this.formatNegation(value);
+    }
+
+    //remove formatting from number
+    value = this.removeFormatting(value);
+
+    return this.formatNumString(value);
+  }
+
+  /*** format specific methods end ***/
+
+  onChange(e: SyntheticInputEvent) {
     e.persist();
     const el = e.target;
     const inputValue = el.value;
     const {state, props} = this;
     const {isAllowed} = props;
-    const lastValue = state.value;
-    let {formattedValue, value} = this.formatInput(inputValue); // eslint-disable-line prefer-const
+    const lastValue = state.value || '';
+    let {formattedValue = '', value} = this.formatInput(inputValue); // eslint-disable-line prefer-const
 
     /*Max of selectionStart and selectionEnd is taken for the patch of pixel and other mobile device caret bug*/
     const currentCaretPosition = Math.max(el.selectionStart, el.selectionEnd);
@@ -415,7 +470,7 @@ class NumberFormat extends React.Component {
     const valueObj = {
       formattedValue,
       value,
-      floatValue: this.getFloatValue(value)
+      floatValue: parseFloat(value)
     };
 
     if (!isAllowed(valueObj)) {
@@ -441,7 +496,7 @@ class NumberFormat extends React.Component {
     return value;
   }
 
-  onKeyDown(e) {
+  onKeyDown(e: SyntheticKeyboardInputEvent) {
     const el = e.target;
     const {selectionEnd, value} = el;
     let {selectionStart} = el;
@@ -472,7 +527,7 @@ class NumberFormat extends React.Component {
     this.props.onKeyDown(e);
   }
 
-  onMouseUp(e) {
+  onMouseUp(e: SyntheticMouseInputEvent) {
     const el = e.target;
     const {selectionStart, selectionEnd, value} = el;
 
