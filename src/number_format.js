@@ -13,6 +13,10 @@ declare class SyntheticMouseInputEvent extends SyntheticMouseEvent {
 
 function noop(){}
 
+function charIsNumber(char) {
+  return !!(char || '').match(/\d/);
+}
+
 function escapeRegExp(str) {
   return str.replace(/[\-\[\]\/\{\}\(\)\*\+\?\.\\\^\$\|]/g, "\\$&");
 }
@@ -148,7 +152,16 @@ class NumberFormat extends React.Component {
   getFloatString(num: string) {
     const {decimalSeparator} = this.getSeparators();
     const numRegex = this.getNumberRegex(true);
-    return (num.match(numRegex) || []).join('').replace(decimalSeparator, '.');
+    num  = (num.match(numRegex) || []).join('').replace(decimalSeparator, '.');
+
+    //remove extra decimals
+    const firstDecimalIndex = num.indexOf('.');
+
+    if (firstDecimalIndex !== -1) {
+      num = `${num.substring(0, firstDecimalIndex)}.${num.substring(firstDecimalIndex + 1, num.length).replace(new RegExp(escapeRegExp(decimalSeparator), 'g'), '')}`
+    }
+
+    return num;
   }
 
   //returned regex assumes decimalSeparator is as per prop
@@ -220,18 +233,53 @@ class NumberFormat extends React.Component {
   }
 
   /* This keeps the caret within typing area so people can't type in between prefix or suffix */
-  correctCaretPosition(value: string, caretPos: number) {
-    const {prefix, suffix} = this.props;
-    return Math.min(Math.max(caretPos, prefix.length), (value.length - suffix.length));
+  correctCaretPosition(value: string, caretPos: number, direction?: string) {
+    const {prefix, suffix, format} = this.props;
+
+    //in case of format as number limit between prefix and suffix
+    if (!format) {
+      return Math.min(Math.max(caretPos, prefix.length), (value.length - suffix.length));
+    }
+
+    //in case if custom format method don't do anything
+    if (typeof format === 'function') return caretPos;
+
+    //in case format is string find the closest # position from the caret position
+    if (format[caretPos] === '#' && charIsNumber(value[caretPos])) return caretPos;
+
+
+    //find the nearest caret position
+    const firstHashPosition = format.indexOf('#');
+    const lastHashPosition = format.lastIndexOf('#');
+
+    //limit the cursor between the first # position and the last hash position
+    caretPos = Math.min(Math.max(caretPos, firstHashPosition), lastHashPosition + 1);
+
+    const nextPos = format.substring(caretPos, format.length).indexOf('#');
+    let caretLeftBound = caretPos;
+    const caretRightBoud = caretPos + (nextPos === -1 ? 0 : nextPos)
+
+    //get the position where the last number is present
+    while (caretLeftBound > firstHashPosition && (format[caretLeftBound] !== '#' || !charIsNumber(value[caretLeftBound]))) {
+      caretLeftBound -= 1;
+    }
+
+    const goToLeft = !charIsNumber(value[caretRightBoud])
+    || (direction === 'left' && caretPos !== firstHashPosition)
+    || (caretPos - caretLeftBound < caretRightBoud - caretPos);
+
+    return goToLeft ? caretLeftBound + 1 : caretRightBoud;
   }
 
   getCaretPosition(inputValue: string, formattedValue: string, caretPos: number) {
+    const {format} = this.props;
+    const stateValue = this.state.value;
     const numRegex = this.getNumberRegex(true);
     const inputNumber = (inputValue.match(numRegex) || []).join('');
     const formattedNumber = (formattedValue.match(numRegex) || []).join('');
     let j, i;
 
-    j=0;
+    j = 0;
 
     for(i=0; i<caretPos; i++){
       const currentInputChar = inputValue[i];
@@ -247,6 +295,13 @@ class NumberFormat extends React.Component {
       //we are not using currentFormatChar because j can change here
       while(currentInputChar !== formattedValue[j] && !(formattedValue[j]||'').match(numRegex) && j<formattedValue.length) j++;
       j++;
+    }
+
+    //fix the initial input cursor position when format pattern is defined and has number in pattern before the hash
+    //inputValue.length will be only less in case of initial input or delete
+    if (typeof format === 'string' && !stateValue) {
+      //set it to the maximum value so it goes after the last number
+      j = formattedValue.length
     }
 
     //correct caret position if its outsize of editable area
@@ -288,11 +343,24 @@ class NumberFormat extends React.Component {
     let start = 0;
     let numStr = '';
 
-    formatArray.forEach((part) => {
-      const index = val.indexOf(part, start);
-      numStr += val.substring(start, index);
-      start = index + part.length;
-    })
+    for (let i=0, ln=formatArray.length; i <= ln; i++) {
+      const part = formatArray[i] || '';
+
+      //if i is the last fragment take the index of end of the value
+      //For case like +1 (911) 911 91 91 having pattern +1 (###) ### ## ##
+      const index = i === ln ? val.length : val.indexOf(part, start);
+
+      /* in any case if we don't find the pattern part in the value assume the val as numeric string
+      This will be also in case if user has started typing, in any other case it will not be -1
+      unless wrong prop value is provided */
+      if (index === -1) {
+        numStr = val;
+        break;
+      } else {
+        numStr += val.substring(start, index);
+        start = index + part.length;
+      }
+    }
 
     return (numStr.match(/\d/g) || []).join('');
   }
@@ -500,25 +568,29 @@ class NumberFormat extends React.Component {
     const el = e.target;
     const {selectionEnd, value} = el;
     let {selectionStart} = el;
-    const {decimalPrecision, prefix, suffix} = this.props;
+    const {decimalPrecision, prefix, suffix, format} = this.props;
     const {key} = e;
     const numRegex = this.getNumberRegex(false, decimalPrecision !== undefined);
     const negativeRegex = new RegExp('-');
+    const isPatternFormat = typeof format === 'string';
 
     //Handle backspace and delete against non numerical/decimal characters
     if(selectionStart === selectionEnd) {
       let newCaretPosition = selectionStart;
+      const leftBound = isPatternFormat ? format.indexOf('#') : prefix.length;
+      const rightBound = isPatternFormat ? format.lastIndexOf('#') + 1 : value.length - suffix.length;
 
       if (key === 'ArrowLeft' || key === 'ArrowRight') {
+        const direction = key === 'ArrowLeft' ? 'left' : 'right';
         selectionStart += key === 'ArrowLeft' ? -1 : +1;
-        newCaretPosition = this.correctCaretPosition(value, selectionStart);
+        newCaretPosition = this.correctCaretPosition(value, selectionStart, direction);
       } else if (key === 'Delete' && !numRegex.test(value[selectionStart]) && !negativeRegex.test(value[selectionStart])) {
-        while (!numRegex.test(value[newCaretPosition]) && newCaretPosition < (value.length - suffix.length)) newCaretPosition++;
+        while (!numRegex.test(value[newCaretPosition]) && newCaretPosition < rightBound) newCaretPosition++;
       } else if (key === 'Backspace' && !numRegex.test(value[selectionStart - 1]) && !negativeRegex.test(value[selectionStart-1])) {
-        while (!numRegex.test(value[newCaretPosition - 1]) && newCaretPosition > prefix.length) newCaretPosition--;
+        while (!numRegex.test(value[newCaretPosition - 1]) && newCaretPosition > leftBound) newCaretPosition--;
       }
 
-      if (newCaretPosition !== selectionStart) {
+      if (newCaretPosition !== selectionStart || newCaretPosition === leftBound || newCaretPosition === rightBound + 1) {
         e.preventDefault();
         this.setPatchedCaretPosition(el, newCaretPosition, value);
       }
