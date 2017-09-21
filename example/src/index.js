@@ -68,7 +68,7 @@ class App extends React.Component {
             ThousandSeperator: ' ', decimalSeparator='.'
           </div>
           <div>
-            <NumberFormat thousandSeparator=" " decimalSeparator="." prefix="$" />
+            <NumberFormat thousandSeparator=" " decimalSeparator="." prefix="$$$" />
           </div>
         </div>
 
@@ -103,7 +103,7 @@ class App extends React.Component {
             Format with mask : Format credit card in an input
           </h3>
           <NumberFormat format="#### #### #### ####" mask="_"/>
-          <NumberFormat value="9876543210" format="+1 (###) ### ## ##" />
+          <NumberFormat value="9876543210" format="+1 (###) ### # ##"/>
         </div>
 
         <div className="example">

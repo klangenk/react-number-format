@@ -90,7 +90,8 @@ const propTypes = {
   onMouseUp: PropTypes.func,
   onChange: PropTypes.func,
   type: PropTypes.oneOf(['text', 'tel']),
-  isAllowed: PropTypes.func
+  isAllowed: PropTypes.func,
+  renderText: PropTypes.func
 };
 
 const defaultProps = {
@@ -149,9 +150,14 @@ class NumberFormat extends React.Component {
   }
 
   /** Misc methods **/
-  getFloatString(num: string) {
+  getFloatString(num: string = '') {
     const {decimalSeparator} = this.getSeparators();
     const numRegex = this.getNumberRegex(true);
+
+    //remove negation for regex check
+    const hasNegation = num[0] === '-';
+    if(hasNegation) num = num.replace('-', '');
+
     num  = (num.match(numRegex) || []).join('').replace(decimalSeparator, '.');
 
     //remove extra decimals
@@ -160,6 +166,9 @@ class NumberFormat extends React.Component {
     if (firstDecimalIndex !== -1) {
       num = `${num.substring(0, firstDecimalIndex)}.${num.substring(firstDecimalIndex + 1, num.length).replace(new RegExp(escapeRegExp(decimalSeparator), 'g'), '')}`
     }
+
+    //add negation back
+    if(hasNegation) num = '-' + num;
 
     return num;
   }
@@ -191,6 +200,15 @@ class NumberFormat extends React.Component {
       decimalSeparator,
       thousandSeparator
     }
+  }
+
+  getMaskAtIndex (index: number) {
+    const {mask = ' '} = this.props;
+    if (typeof mask === 'string') {
+      return mask;
+    }
+
+    return mask[index] || ' ';
   }
 
   /** Misc methods end **/
@@ -391,12 +409,12 @@ class NumberFormat extends React.Component {
    * @return {string}        formatted Value
    */
   formatWithPattern(numStr: string) {
-    const {format, mask = ' '} = this.props;
+    const {format} = this.props;
     let hashCount = 0;
     const formattedNumberAry = format.split('');
     for (let i = 0, ln = format.length; i < ln; i++) {
       if (format[i] === '#') {
-        formattedNumberAry[i] = numStr[hashCount] || mask;
+        formattedNumberAry[i] = numStr[hashCount] || this.getMaskAtIndex(hashCount);
         hashCount += 1;
       }
     }
@@ -614,22 +632,25 @@ class NumberFormat extends React.Component {
   }
 
   render() {
-    const props = omit(this.props, propTypes);
+    const {type, displayType, customInput, renderText} = this.props;
+    const {value} = this.state;
 
-    const inputProps = Object.assign({}, props, {
-      type:this.props.type,
-      value:this.state.value,
-      onChange:this.onChange,
-      onKeyDown:this.onKeyDown,
+    const otherProps = omit(this.props, propTypes);
+
+    const inputProps = Object.assign({}, otherProps, {
+      type,
+      value,
+      onChange: this.onChange,
+      onKeyDown: this.onKeyDown,
       onMouseUp: this.onMouseUp
     })
 
-    if( this.props.displayType === 'text'){
-      return (<span {...props}>{this.state.value}</span>);
+    if( displayType === 'text'){
+      return renderText ? (renderText(value) || null) : <span {...otherProps}>{value}</span>;
     }
 
-    else if (this.props.customInput) {
-      const CustomInput = this.props.customInput;
+    else if (customInput) {
+      const CustomInput = customInput;
       return (
         <CustomInput
           {...inputProps}
